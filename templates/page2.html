@@ -16,7 +16,7 @@
       <span class="slider round"></span>
     </label>
     <span id="data-source-label" style="font-size: 13px; color:#111827;">
-      {% if s3_enabled and data_source == 's3' %}AWS S3{% else %}Local{% endif %}
+      {% if s3_enabled and data_source == 's3' %}AWS S3{% else %}Local(Limited Amount of Demo Data){% endif %}
     </span>
     {% if not s3_enabled %}
       <span style="font-size: 12px; color:#9ca3af;">S3 unavailable (missing or invalid AWS config)</span>

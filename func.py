@@ -574,3 +574,5 @@ if __name__ == "__main__":
         # using s3 by default
     x = 1
 
+    #NOTE: project note: sp500 overall % is off for treemaps, need to double check
+
