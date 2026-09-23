@@ -1,20 +1,21 @@
 # About
 My project repo for creating an application to simplifying the process of calculating potential returns in the market (S&P 500) using the python yfinance API.
 
-**Page 1**: Interface to calculate returns from the market in any period between 1975-2025. Has options for:
-* Contribution per interval
-* Contribution per interval
-* Investing strategy: Dollar-cost averaging or 'Buying the Dip' 
-* Interval Section : weekly, monthly, biannual, etc.
 
-**Page 2**: Has daily treemaps for the composition of the entire S&P 500. Components are size-based on market caps and colored (green/red) based on daily return compared to previous close.  [Example here](https://market-return-calc-project1.s3.us-west-1.amazonaws.com/treemaps/2026-01-20_treemap.html) 
+**Page 1**: Has daily treemaps for the composition of the entire S&P 500. Components are size-based on market caps and colored (green/red) based on daily return compared to previous close.  [Example here](https://market-return-calc-project1.s3.us-west-1.amazonaws.com/treemaps/2026-01-20_treemap.html) 
 Treemaps can be stored locally in directory or with AWS S3.
 
 Charts are inspired by the visualizations in the daily StockTwits newsletter made by FinViz found [here](https://finviz.com/map.ashx?t=sec&utm_source=dailyrip&utm_medium=newsletter&utm_campaign=email&_bhlid=cbb28bc82581f0f05f301a711c8c9b20a670e957)
 
 
-**Page 3**: Has live candle-stick chart of S&P 500 that updates every minute while the market is open. Shows opening, low, high, and closing price per minute.
+**Page 2**: Has live candle-stick chart of S&P 500 that updates every minute while the market is open. Shows opening, low, high, and closing price per minute.
 
+
+**Page 3**: Interface to calculate returns from the market in any period between 1975-Present. Has options for:
+* Contribution per interval
+* Contribution per interval
+* Investing strategy: Dollar-cost averaging or 'Buying the Dip' 
+* Interval Section : weekly, monthly, biannual, etc.
 
 
 # Instructions for Running Code Repo on Local Machine

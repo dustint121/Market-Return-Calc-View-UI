@@ -110,6 +110,12 @@ def get_current_sp500_companies(current_date=None, save_to_csv=False):
     #go through changes table to: 
         #  remove companies that were removed before current_date 
         #  add those that were added before current_date
+    url = "https://en.wikipedia.org/wiki/Historical_components_of_the_S%26P_500"
+    email = "anon72@gmail.com"
+    header = { 'User-Agent': email }
+    request = requests.get(url, headers=header)
+    soup = bs4.BeautifulSoup(request.text, 'html.parser')
+
     #get table with 'id' of 'changes'
     table_changes = soup.find('table', {'id': 'changes'})
     df_changes = pd.read_html(StringIO(str(table_changes)))[0]
@@ -130,7 +136,8 @@ def get_current_sp500_companies(current_date=None, save_to_csv=False):
     })
     # filter changes after current_date
     df_changes_final = df_changes_final[pd.to_datetime(df_changes_final["Effective Date"]) >= pd.to_datetime(current_date)]
-    
+    # print(df_changes_final[["Effective Date", "Added Ticker", "Removed Ticker"]])
+
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # folder of this file
     company_df = pd.read_csv(f"{BASE_DIR}/sp500_companies_2023-2025.csv")
     for index, row in df_changes_final.iterrows():
@@ -140,6 +147,8 @@ def get_current_sp500_companies(current_date=None, save_to_csv=False):
         if pd.notna(row["Removed Ticker"]):
             #read company info from company_df
             company_info = company_df[company_df["Symbol"] == row["Removed Ticker"]]
+            # there are duplicate entries for some tickers in company_df; get only the first one
+            company_info = company_info.iloc[0:1]
             if not company_info.empty:
                 df = pd.concat([df, company_info], ignore_index=True) # add removed companies back
 
@@ -149,13 +158,13 @@ def get_current_sp500_companies(current_date=None, save_to_csv=False):
 
 
 #NOTE: market cap is of current date at time of running code, will not reflect historical market cap
-def get_market_data_of_sp500(current_date="2025-12-31", use_S3=False):
+def get_market_data_of_sp500(current_date, use_S3=False):
     df = None
     if current_date < "2026-02-01" and current_date >= "2025-12-23":
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # folder of this file
         df = pd.read_csv(f"{BASE_DIR}/sp500_companies_eoy2025.csv")
     else:
-        df = get_current_sp500_companies()
+        df = get_current_sp500_companies(current_date=current_date)
 
     df["Symbol"] = df["Symbol"].str.replace(r'\.', '-', regex=True) #debugging for BRK-B and BF-B
     df['market_cap'] = None # market capitalization
@@ -567,6 +576,8 @@ if __name__ == "__main__":
     #     # generate_sp500_treemap(current_date)
     #     generate_sp500_treemap(current_date, use_S3=True)
 
+
+    # df = get_current_sp500_companies(current_date="2026-08-21")
 
 
 

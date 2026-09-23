@@ -14,7 +14,9 @@ app = Flask(__name__)
 
 
 
-# ---------- PAGE 1: S&P 500 returns ----------
+# ---------- /page1 route: Treemaps List ----------
+# NOTE: /api/returns and /api/sp500_chart below are used by /page3 (S&P 500 returns calculator)
+# NOTE: GRAPH_DIR below is also used by /page2 (Live S&P 500 Chart / Market Status)
 GRAPH_DIR = os.path.join(os.path.dirname(__file__), "")
 os.makedirs(GRAPH_DIR, exist_ok=True)
 
@@ -22,11 +24,50 @@ os.makedirs(GRAPH_DIR, exist_ok=True)
 @app.route("/", methods=["GET"]) #if commented out: it gives 404 error, but /page1 still works
 @app.route("/page1", methods=["GET"])
 def page1():
-    start_year = 1975
-    end_year = 2025
-    return render_template("page1.html",
-                           start_year=start_year,
-                           end_year=end_year)
+    s3_ok = s3_config_valid()
+
+    # read requested source from query string: ?source=local or ?source=s3
+    requested = request.args.get("source", "").lower()
+    if requested not in ("local", "s3"):
+        requested = "s3" if s3_ok else "local"
+
+    # effective source: only use s3 if requested AND available
+    data_source = "s3" if (requested == "s3" and s3_ok) else "local"
+    use_s3 = (data_source == "s3")
+
+    files = []
+    if use_s3 and s3_client is not None:
+        resp = s3_client.list_objects_v2(Bucket=AWS_S3_BUCKET_NAME, Prefix="treemaps/")
+        if "Contents" in resp:
+            for obj in resp["Contents"]:
+                key = obj["Key"]
+                if key.endswith("_treemap.html"):
+                    files.append(os.path.basename(key))
+    else:
+        if os.path.isdir(TREEMAP_DIR):
+            for name in os.listdir(TREEMAP_DIR):
+                if name.endswith("_treemap.html"):
+                    files.append(name)
+
+    files.sort(reverse=True)
+
+    meta_df = read_all_treemap_metadata(use_S3=use_s3)
+    meta_by_date = {}
+    for _, row in meta_df.iterrows():
+        meta_by_date[row["date"]] = {
+            "sp500_percent_change": row["sp500_percent_change"],
+            "total_market_cap": row["total_market_cap"],
+        }
+
+    return render_template(
+        "page1.html",
+        files=files,
+        meta_by_date=meta_by_date,
+        data_source=data_source,   # drives UI state
+        aws_bucket=AWS_S3_BUCKET_NAME,
+        aws_region=AWS_REGION_NAME,
+        s3_enabled=s3_ok,
+    )
 
 
 @app.route("/api/returns", methods=["POST"])
@@ -254,7 +295,7 @@ def serve_graph(filename):
     return send_from_directory(GRAPH_DIR, filename) 
 
 
-# ---------- PAGE 2: Treemaps List ----------
+# ---------- Treemaps shared setup (used by /page1 route above) ----------
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # folder of this file
 TREEMAP_DIR = os.path.join(BASE_DIR, "treemaps")
@@ -278,54 +319,29 @@ s3_client = None
 if s3_config_valid():
     s3_client = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
 
- 
+
+# ---------- /page2 route: Live S&P 500 Chart (Market Status) ----------
+
 @app.route("/page2", methods=["GET"])
 def page2():
-    s3_ok = s3_config_valid()
+    open_now = is_market_open_now()
+    next_open_dt = None
+    days = hours = minutes = seconds = 0
 
-    # read requested source from query string: ?source=local or ?source=s3
-    requested = request.args.get("source", "").lower()
-    if requested not in ("local", "s3"):
-        requested = "s3" if s3_ok else "local"
-
-    # effective source: only use s3 if requested AND available
-    data_source = "s3" if (requested == "s3" and s3_ok) else "local"
-    use_s3 = (data_source == "s3")
-
-    files = []
-    if use_s3 and s3_client is not None:
-        resp = s3_client.list_objects_v2(Bucket=AWS_S3_BUCKET_NAME, Prefix="treemaps/")
-        if "Contents" in resp:
-            for obj in resp["Contents"]:
-                key = obj["Key"]
-                if key.endswith("_treemap.html"):
-                    files.append(os.path.basename(key))
-    else:
-        if os.path.isdir(TREEMAP_DIR):
-            for name in os.listdir(TREEMAP_DIR):
-                if name.endswith("_treemap.html"):
-                    files.append(name)
-
-    files.sort(reverse=True)
-
-    meta_df = read_all_treemap_metadata(use_S3=use_s3)
-    meta_by_date = {}
-    for _, row in meta_df.iterrows():
-        meta_by_date[row["date"]] = {
-            "sp500_percent_change": row["sp500_percent_change"],
-            "total_market_cap": row["total_market_cap"],
-        }
+    if not open_now:
+        next_open, time_until, days, hours, minutes, seconds = get_time_until_next_market_open()
+        # next_open is a tz-aware Timestamp in America/New_York
+        next_open_dt = next_open.isoformat()  # for JS, keeps timezone
 
     return render_template(
         "page2.html",
-        files=files,
-        meta_by_date=meta_by_date,
-        data_source=data_source,   # drives UI state
-        aws_bucket=AWS_S3_BUCKET_NAME,
-        aws_region=AWS_REGION_NAME,
-        s3_enabled=s3_ok,
+        market_open=open_now,
+        next_open_iso=next_open_dt,
+        rem_days=days,
+        rem_hours=hours,
+        rem_minutes=minutes,
+        rem_seconds=seconds,
     )
-
 
 
 @app.route("/treemaps/<path:filename>")
@@ -369,28 +385,15 @@ def set_data_source():
 
 
 
-# ---------- PAGE 3: Market Status ----------
+# ---------- /page3 route: S&P 500 Returns Calculator ----------
 
 @app.route("/page3", methods=["GET"])
 def page3():
-    open_now = is_market_open_now()
-    next_open_dt = None
-    days = hours = minutes = seconds = 0
-
-    if not open_now:
-        next_open, time_until, days, hours, minutes, seconds = get_time_until_next_market_open()
-        # next_open is a tz-aware Timestamp in America/New_York
-        next_open_dt = next_open.isoformat()  # for JS, keeps timezone
-
-    return render_template(
-        "page3.html",
-        market_open=open_now,
-        next_open_iso=next_open_dt,
-        rem_days=days,
-        rem_hours=hours,
-        rem_minutes=minutes,
-        rem_seconds=seconds,
-    )
+    start_year = 1975
+    end_year = int(datetime.now().year)
+    return render_template("page3.html",
+                           start_year=start_year,
+                           end_year=end_year)
 
 if __name__ == "__main__":
     #set host toallow for all IPs

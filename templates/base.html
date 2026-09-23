@@ -161,15 +161,15 @@
       <div class="nav-tabs">
         <a href="{{ url_for('page1') }}"
            class="nav-tab {% if request.path.startswith('/page1') or request.path == '/' %}active{% endif %}">
-          S&P 500 Returns
+          Treemaps
         </a>
         <a href="{{ url_for('page2') }}"
            class="nav-tab {% if request.path.startswith('/page2') %}active{% endif %}">
-          Treemaps
+          Live S&P 500 Chart
         </a>
         <a href="{{ url_for('page3') }}"
            class="nav-tab {% if request.path.startswith('/page3') %}active{% endif %}">
-          Live S&P 500 Chart
+          S&P 500 Returns
         </a>
       </div>
     </div>

@@ -2,94 +2,411 @@
 
 {% block content %}
 <div class="box">
-  <h2>Market Status (NYSE)</h2>
+  <h2>S&P 500 Returns Calculator (1975-2025)</h2>
 
-  {% if market_open %}
-    <p style="font-size: 15px; margin-top: 8px;">
-      The market is currently <strong>OPEN</strong> (New York time).
-    </p>
-
-    <div style="margin-top: 16px;">
-      <h3 style="margin: 0 0 8px 0; font-size: 14px;">* Below chart refreshes every minute during trading day</h3>
-      <iframe
-        id="candlestick-iframe"
-        src="/graphs/sp500_candlestick_daily_1m.html"
-        style="width: 100%; height: 480px; border: 1px solid #d1d5db; border-radius: 8px;"
-      ></iframe>
+  <form id="returns-form">
+    <div style="margin-bottom: 16px;">
+      <label>Start year: <span id="start-year-label">{{ start_year }}</span></label><br>
+      <input type="range" id="start-year" name="start_year"
+             min="{{ start_year }}" max="{{ end_year }}" value="{{ start_year }}">
     </div>
-  {% else %}
-    <!-- existing next-open + countdown block stays as-is -->
-    <p style="font-size: 14px; margin-top: 8px; color:#4b5563;">
-      Next market open (New York time):
-    </p>
-    <p id="next-open-display"
-       style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">
-    </p>
 
-    <div style="margin-top: 8px;">
-      <p style="font-size: 14px; margin-bottom: 4px;">Time until next open:</p>
-      <div id="countdown"
-           style="font-size: 20px; font-weight: 600; letter-spacing: 1px;">
-        {{ rem_days }}d {{ rem_hours }}h {{ rem_minutes }}m {{ rem_seconds }}s
+    <div style="margin-bottom: 16px;">
+      <label>End year: <span id="end-year-label">{{ end_year }}</span></label><br>
+      <input type="range" id="end-year" name="end_year"
+             min="{{ start_year }}" max="{{ end_year }}" value="{{ end_year }}">
+    </div>
+
+    <div style="margin-top: 8px; margin-bottom: 16px;">
+      <button type="button" id="view-graph-btn" class="pill-button">
+        View Graph
+      </button>
+    </div>
+
+    <div style="margin-bottom: 16px;">
+    <label>Contribution per interval ($):</label><br>
+    <input type="number" id="contribution" name="contribution"
+            value="100" min="1" step="1" class="rounded-input">
+    </div>
+
+    <div class="section-box">
+        <h3 style="margin-top: 0;">Investing Intervals</h3>
+        <div class="interval-box">
+        <label><input type="radio" name="interval" value="weekly" checked> Weekly</label><br>
+        <label><input type="radio" name="interval" value="monthly"> Monthly</label><br>
+        <label><input type="radio" name="interval" value="quarterly"> Quarterly</label><br>
+        <label><input type="radio" name="interval" value="biannual"> Biannual</label><br>
+        <label><input type="radio" name="interval" value="annually"> Annually</label><br>
+        <label>
+            <input type="radio" name="interval" value="custom"> Custom (every
+            <input type="number" id="custom-days" min="1" style="width: 70px;" disabled> days)
+        </label>
+        </div>
+    </div>
+
+
+
+    <div class="section-box">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <h3 style="margin: 0;">Investment Strategy Option</h3>
+        <span id="strategy-help-trigger"
+              style="display:inline-flex; align-items:center; justify-content:center;
+                    width:18px; height:18px; border-radius:999px; border:1px solid #9ca3af;
+                    font-size:12px; cursor:pointer; color:#4b5563; background-color:#f9fafb;">
+          ?
+        </span>
+      </div>
+
+      <!-- popup -->
+      <div id="strategy-help-popup"
+          style="display:none; position:absolute; z-index:30;
+                  max-width:280px; padding:10px 12px; font-size:12px;
+                  background:#111827; color:#f9fafb; border-radius:6px;
+                  box-shadow:0 4px 12px rgba(15,23,42,0.4);">
+        <div style="font-weight:600; margin-bottom:4px;">Strategy explanations</div>
+        <div style="margin-bottom:4px;">
+          <strong>DCA</strong>: Invest the same amount at each interval regardless of market moves.
+        </div>
+        <div>
+          <strong>Buying the Dip (Immediate)</strong>: Add cash each interval but only invest when the S&amp;P 500
+          falls at least the chosen % vs the previous trading day; all accumulated cash is used on dip days.
+        </div>
+        <div>
+          <strong>Buying the Dip (Non-immediate)</strong>: Add cash each interval but only invest when the S&amp;P 500
+          falls at least the chosen % vs the worst price in the lookback window (e.g. 7 days if 'week' is selected); 
+          all accumulated cash is used on dip days.
+        </div>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+        <div>
+          <label style="font-size: 13px; color:#4b5563;">Strategy:</label><br>
+          <label style="font-size: 13px;">
+            <input type="radio" name="strategy" value="dca" checked>
+            Dollar Cost Averaging
+          </label><br>
+          <label style="font-size: 13px;">
+            <input type="radio" name="strategy" value="buy_the_dip">
+            Buying the Dip (Immediate)
+          </label><br>
+          <label style="font-size: 13px;">
+            <input type="radio" name="strategy" value="buy_the_dip_non_immediate">
+            Buying the Dip (Non-immediate)
+          </label>
+        </div>
+
+        <div id="dip-threshold-wrapper" style="display:none;">
+          <label style="font-size: 13px; color:#4b5563;">
+            Dip threshold (% drop vs previous trading day):
+          </label><br>
+          <input type="number" id="dip-threshold"
+                class="rounded-input"
+                style="width: 120px;"
+                min="0" step="0.1" value="2">
+          <span style="font-size: 12px; color:#6b7280;">
+            (e.g. 2 means invest when the S&amp;P 500 drops at least 2%)
+          </span>
+        </div>
       </div>
     </div>
-  {% endif %}
+
+
+    <button type="submit" class="pill-button">Calculate</button>
+  </form>
+
+
+
+
+  <div id="results" class="section-box" style="margin-top: 20px; display:none;">
+    <h3 style="margin-top: 0;">Results</h3>
+    <p>Total invested: <span id="total-invested"></span></p>
+    <p>Final value: <span id="final-value"></span></p>
+    <p>Total return: <span id="total-return"></span></p>
+    <p>Total return(%): <span id="total-return-pct"></span></p>
+    <p>Final S&P 500 index: <span id="final-price"></span></p>
+
+    <details id="interval-details" style="margin-top: 12px;">
+      <summary style="cursor: pointer; font-weight: 600;">
+        Show per-interval calculations
+      </summary>
+      <div style="margin-top: 8px; overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr>
+              <th style="border-bottom: 1px solid #d1d5db; text-align: left; padding: 4px 6px;">#</th>
+              <th style="border-bottom: 1px solid #d1d5db; text-align: left; padding: 4px 6px;">Date</th>
+              <th style="border-bottom: 1px solid #d1d5db; text-align: right; padding: 4px 6px;">Index value</th>
+              <th style="border-bottom: 1px solid #d1d5db; text-align: right; padding: 4px 6px;">Contribution</th>
+              <th style="border-bottom: 1px solid #d1d5db; text-align: right; padding: 4px 6px;">Shares</th>
+              <th style="border-bottom: 1px solid #d1d5db; text-align: right; padding: 4px 6px;">Final value</th>
+              <th style="border-bottom: 1px solid #d1d5db; text-align: right; padding: 4px 6px;">Profit</th>
+            </tr>
+          </thead>
+          <tbody id="interval-rows">
+            <!-- filled by JS -->
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </div>
+
+
+  <div id="error" style="margin-top: 12px; color: red;"></div>
 </div>
+
+<!-- Graph modal -->
+<div id="graph-modal"
+     style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:50; align-items:center; justify-content:center;">
+  <div style="background:#ffffff; border-radius:8px; max-width:900px; width:95%; max-height:90vh; display:flex; flex-direction:column;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid #e5e7eb;">
+      <span style="font-weight:600; font-size:14px;">S&P 500 Index Chart</span>
+      <button type="button" id="close-graph-btn"
+              style="border:none; background:transparent; cursor:pointer; font-size:18px; line-height:1;">
+        x
+      </button>
+    </div>
+    <div style="flex:1; padding:8px 12px;">
+      <iframe id="graph-iframe"
+              src=""
+              style="width:100%; height:70vh; border:none;"></iframe>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
-{% if not market_open and next_open_iso %}
 <script>
-  const nextOpenIso = "{{ next_open_iso }}";
-  const nextOpen = new Date(nextOpenIso);
+  const startSlider = document.getElementById('start-year');
+  const endSlider = document.getElementById('end-year');
+  const startLabel = document.getElementById('start-year-label');
+  const endLabel = document.getElementById('end-year-label');
+  const customDaysInput = document.getElementById('custom-days');
 
-  const nextOpenDisplay = document.getElementById('next-open-display');
-  const countdownEl = document.getElementById('countdown');
-
-  if (nextOpenDisplay) {
-    const opts = {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      timeZoneName: 'short', timeZone: 'America/New_York'
-    };
-    const formatter = new Intl.DateTimeFormat('en-US', opts);
-    nextOpenDisplay.textContent = formatter.format(nextOpen);
-  }
-
-  function updateCountdown() {
-    const now = new Date();
-    const diffMs = nextOpen.getTime() - now.getTime();
-    if (diffMs <= 0) {
-      countdownEl.textContent = "Market should be open now.";
-      clearInterval(timerId);
-      return;
+  function clampYears() {
+    let s = parseInt(startSlider.value);
+    let e = parseInt(endSlider.value);
+    if (s > e) {
+      if (this === startSlider) {
+        endSlider.value = s;
+        e = s;
+      } else {
+        startSlider.value = e;
+        s = e;
+      }
     }
-    const totalSeconds = Math.floor(diffMs / 1000);
-    const days = Math.floor(totalSeconds / (24 * 3600));
-    const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    countdownEl.textContent = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+    startLabel.textContent = s;
+    endLabel.textContent = e;
   }
 
-  const timerId = setInterval(updateCountdown, 1000);
-  updateCountdown();
-</script>
-{% endif %}
+  startSlider.addEventListener('input', clampYears);
+  endSlider.addEventListener('input', clampYears);
 
-{% if market_open %}
-<script>
-  const iframe = document.getElementById('candlestick-iframe');
-  if (iframe) {
-    // reload every 60 seconds; adjust as needed
-    setInterval(() => {
-      // add a cache-buster query param so the browser doesn't use a cached copy
-      const base = "/graphs/sp500_candlestick_daily_1m.html";
-      const ts = Date.now();
-      iframe.src = base + "?t=" + ts;
-    }, 60000);
+  document.querySelectorAll('input[name="interval"]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (r.value === 'custom' && r.checked) {
+        customDaysInput.disabled = false;
+      } else if (r.checked) {
+        customDaysInput.disabled = true;
+        customDaysInput.value = '';
+      }
+    });
+  });
+
+  // Strategy help popup
+  const helpTrigger = document.getElementById('strategy-help-trigger');
+  const helpPopup = document.getElementById('strategy-help-popup');
+
+  if (helpTrigger && helpPopup) {
+    helpTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isVisible = helpPopup.style.display === 'block';
+
+      if (isVisible) {
+        helpPopup.style.display = 'none';
+        return;
+      }
+
+      const rect = helpTrigger.getBoundingClientRect();
+      const scrollY = window.scrollY || window.pageYOffset;
+      const scrollX = window.scrollX || window.pageXOffset;
+
+      helpPopup.style.left = (rect.left + scrollX + 24) + 'px';
+      helpPopup.style.top = (rect.top + scrollY + 4) + 'px';
+      helpPopup.style.display = 'block';
+    });
+
+    // Hide when clicking elsewhere
+    document.addEventListener('click', (e) => {
+      if (!helpPopup.contains(e.target) && e.target !== helpTrigger) {
+        helpPopup.style.display = 'none';
+      }
+    });
+  }
+
+
+
+  // NEW: strategy + dip threshold controls
+  const strategyRadios = document.querySelectorAll('input[name="strategy"]');
+  const dipWrapper = document.getElementById('dip-threshold-wrapper');
+  const dipInput = document.getElementById('dip-threshold');
+
+  if (strategyRadios && dipWrapper && dipInput) {
+    strategyRadios.forEach(r => {
+      r.addEventListener('change', () => {
+        if ((r.value === 'buy_the_dip' || r.value === 'buy_the_dip_non_immediate') && r.checked) {
+          dipWrapper.style.display = 'block';
+        } else if (r.checked && r.value === 'dca') {
+          dipWrapper.style.display = 'none';
+        }
+      });
+    });
+  }
+
+  document.getElementById('returns-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const interval = document.querySelector('input[name="interval"]:checked').value;
+    const strategy = document.querySelector('input[name="strategy"]:checked').value;
+    const dipThreshold =
+      (strategy === 'buy_the_dip' || strategy === 'buy_the_dip_non_immediate')
+        ? parseFloat((dipInput && dipInput.value) || '0')
+        : 0;
+
+    const payload = {
+      start_year: parseInt(startSlider.value),
+      end_year: parseInt(endSlider.value),
+      contribution: parseFloat(document.getElementById('contribution').value || '0'),
+      interval: interval,
+      custom_days: interval === 'custom' ? parseInt(customDaysInput.value || '0') : 0,
+      strategy: strategy,                 // NEW
+      dip_threshold_pct: dipThreshold     // NEW
+    };
+
+    const errorEl = document.getElementById('error');
+    const resultsEl = document.getElementById('results');
+    const intervalRows = document.getElementById('interval-rows');
+    const intervalDetails = document.getElementById('interval-details');
+
+    errorEl.textContent = '';
+    resultsEl.style.display = 'none';
+    intervalRows.innerHTML = '';
+
+    try {
+      const resp = await fetch('/api/returns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        errorEl.textContent = data.error || 'Error computing returns.';
+        return;
+      }
+
+      document.getElementById('total-invested').textContent = `$${data.total_invested.toLocaleString()}`;
+      document.getElementById('final-value').textContent = `$${data.final_value.toLocaleString()}`;
+      document.getElementById('total-return').textContent = `$${data.total_return.toLocaleString()}`;
+      document.getElementById('total-return-pct').textContent = `${data.total_return_pct}%`;
+      document.getElementById('final-price').textContent = data.final_price;
+      resultsEl.style.display = 'block';
+
+      // render per-interval rows
+      if (Array.isArray(data.intervals)) {
+        data.intervals.forEach((it, idx) => {
+          const tr = document.createElement('tr');
+
+          const buyPriceDisplay =
+            it.buy_price !== null && it.buy_price !== undefined
+              ? it.buy_price.toLocaleString()
+              : '-';
+
+          const contributionDisplay =
+            it.contribution !== null && it.contribution !== undefined
+              ? it.contribution.toLocaleString()
+              : '-';
+
+          const sharesDisplay =
+            it.shares !== null && it.shares !== undefined
+              ? it.shares.toLocaleString()
+              : '-';
+
+          const finalValueDisplay =
+            it.final_value !== null && it.final_value !== undefined
+              ? it.final_value.toLocaleString()
+              : '-';
+
+          const profitDisplay =
+            it.profit !== null && it.profit !== undefined
+              ? it.profit.toLocaleString()
+              : '-';
+
+          tr.innerHTML = `
+            <td style="padding: 4px 6px;">${idx + 1}</td>
+            <td style="padding: 4px 6px;">${it.date}</td>
+            <td style="padding: 4px 6px; text-align: right;">${buyPriceDisplay}</td>
+            <td style="padding: 4px 6px; text-align: right;">$${contributionDisplay}</td>
+            <td style="padding: 4px 6px; text-align: right;">${sharesDisplay}</td>
+            <td style="padding: 4px 6px; text-align: right;">$${finalValueDisplay}</td>
+            <td style="padding: 4px 6px; text-align: right;">$${profitDisplay}</td>
+          `;
+          intervalRows.appendChild(tr);
+        });
+
+        if (data.intervals.length > 0) {
+          intervalDetails.open = true;
+        }
+      }
+    } 
+    catch (err) {
+      console.error(err);
+      errorEl.textContent = 'Unexpected error: ' + err.message;
+    }
+  });
+
+  const viewGraphBtn = document.getElementById('view-graph-btn');
+  const graphModal = document.getElementById('graph-modal');
+  const graphIframe = document.getElementById('graph-iframe');
+  const closeGraphBtn = document.getElementById('close-graph-btn');
+
+  if (viewGraphBtn) {
+    viewGraphBtn.addEventListener('click', async () => {
+      const startYear = parseInt(startSlider.value);
+      const endYear = parseInt(endSlider.value);
+
+      try {
+        const resp = await fetch('/api/sp500_chart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_year: startYear, end_year: endYear })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.chart_url) {
+          alert('Error generating chart.');
+          return;
+        }
+        graphIframe.src = data.chart_url; 
+        graphModal.style.display = 'flex';
+      } catch (err) {
+        console.error(err);
+        alert('Unexpected error generating chart.');
+      }
+    });
+  }
+
+  if (closeGraphBtn) {
+    closeGraphBtn.addEventListener('click', () => {
+      graphModal.style.display = 'none';
+      graphIframe.src = ''; // optional: clear to stop any running JS
+    });
+  }
+
+  if (graphModal) {
+    graphModal.addEventListener('click', (e) => {
+      if (e.target === graphModal) {
+        graphModal.style.display = 'none';
+        graphIframe.src = '';
+      }
+    });
   }
 </script>
-{% endif %}
-
 {% endblock %}

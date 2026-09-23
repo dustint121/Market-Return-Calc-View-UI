@@ -2,162 +2,94 @@
 
 {% block content %}
 <div class="box">
-  <h2>SP500 Treemap Snapshots</h2>
+  <h2>Market Status (NYSE)</h2>
 
-  <div id="data-source-container"
-      data-s3-enabled="{% if s3_enabled %}true{% else %}false{% endif %}"
-      style="margin-bottom: 16px; display:flex; align-items:center; gap:12px;">
-    <span style="font-size: 13px; color:#4b5563;">Data source:</span>
-    <label class="switch">
-      <input type="checkbox"
-            id="data-source-toggle"
-            {% if not s3_enabled %}disabled{% endif %}
-            {% if s3_enabled and data_source == 's3' %}checked{% endif %}>
-      <span class="slider round"></span>
-    </label>
-    <span id="data-source-label" style="font-size: 13px; color:#111827;">
-      {% if s3_enabled and data_source == 's3' %}AWS S3{% else %}Local(Limited Amount of Demo Data){% endif %}
-    </span>
-    {% if not s3_enabled %}
-      <span style="font-size: 12px; color:#9ca3af;">S3 unavailable (missing or invalid AWS config)</span>
-    {% endif %}
-  </div>
+  {% if market_open %}
+    <p style="font-size: 15px; margin-top: 8px;">
+      The market is currently <strong>OPEN</strong> (New York time).
+    </p>
 
-
-  {% if files %}
-
-    {# Group files into year -> month -> [filenames] #}
-    {% set grouped = {} %}
-    {% for name in files %}
-      {% set base = name.replace('_treemap.html', '') %} {# YYYY-MM-DD #}
-      {% set year = base[:4] %}
-      {% set month = base[5:7] %}
-      {% if year not in grouped %}
-        {% set _ = grouped.update({year: {}}) %}
-      {% endif %}
-      {% if month not in grouped[year] %}
-        {% set _ = grouped[year].update({month: []}) %}
-      {% endif %}
-      {% set _ = grouped[year][month].append(name) %}
-    {% endfor %}
-
-    <div>
-      {# Loop years descending (most recent first) #}
-      {% for year in grouped.keys()|list|sort(reverse=true) %}
-        <details style="margin-bottom: 8px;" open>
-          <summary style="cursor: pointer; font-weight: 600;">
-            {{ year }}
-          </summary>
-
-          <div style="margin-left: 12px; margin-top: 4px;">
-            {# Loop months descending; convert month number to month name #}
-            {% for month in grouped[year].keys()|list|sort(reverse=true) %}
-              {% set month_names = {
-                '01': 'January', '02': 'February', '03': 'March', '04': 'April',
-                '05': 'May', '06': 'June', '07': 'July', '08': 'August',
-                '09': 'September', '10': 'October', '11': 'November', '12': 'December'
-              } %}
-              {% set month_label = month_names[month] %}
-
-              <details style="margin-bottom: 4px;">
-                <summary style="cursor: pointer;">
-                  {{ month_label }}
-                </summary>
-
-                <div class="treemap-tabs" style="margin-left: 12px; margin-top: 4px;">
-                  {# Reverse within each month to show latest date first #}
-                  {% for name in grouped[year][month]|reverse %}
-                    {% set date_str = name.replace('_treemap.html', '') %}
-                    {% set meta = meta_by_date.get(date_str) %}
-                    {% if meta %}
-                      {# signed percent: [+/-][value]% with 2 decimals #}
-                      {% set pct = meta.sp500_percent_change|float %}
-                      {% if pct > 0 %}
-                        {% set sign = '+' %}
-                      {% elif pct < 0 %}
-                        {% set sign = '-' %}
-                      {% else %}
-                        {% set sign = '' %}
-                      {% endif %}
-                      {% set pct_abs_str = '%.2f' % (pct|abs) %}
-                      {% set pct_display = sign ~ pct_abs_str ~ '%' %}
-
-                      {# tooltip text, single line #}
-                      {% set tooltip = "S&P 500 % change: " ~ pct_display
-                        ~ " | Total market cap: " ~ meta.total_market_cap %}
-
-                      {# color based on sign #}
-                      {% if pct > 0 %}
-                        {% set tooltip_color = 'green' %}
-                      {% elif pct < 0 %}
-                        {% set tooltip_color = 'red' %}
-                      {% else %}
-                        {% set tooltip_color = 'neutral' %}
-                      {% endif %}
-                    {% else %}
-                      {% set tooltip = "Date: " ~ date_str ~ " | No metadata available." %}
-                      {% set tooltip_color = 'neutral' %}
-                    {% endif %}
-
-                    {% if data_source == 's3' %}
-                      {# Build direct S3 object URL #}
-                      {% set s3_url = "https://" ~ aws_bucket ~ ".s3." ~ aws_region ~ ".amazonaws.com/treemaps/" ~ name %}
-                      <a href="{{ s3_url }}"
-                        target="_blank"
-                        class="treemap-tab"
-                        data-tooltip="{{ tooltip }}"
-                        data-tooltip-color="{{ tooltip_color }}">
-                        {{ date_str }}
-                      </a>
-                    {% else %}
-                      <a href="{{ url_for('treemap_file', filename=name) }}"
-                        target="_blank"
-                        class="treemap-tab"
-                        data-tooltip="{{ tooltip }}"
-                        data-tooltip-color="{{ tooltip_color }}">
-                        {{ date_str }}
-                      </a>
-                    {% endif %}
-                    
-                  {% endfor %}
-                </div>
-              </details>
-            {% endfor %}
-          </div>
-        </details>
-      {% endfor %}
+    <div style="margin-top: 16px;">
+      <h3 style="margin: 0 0 8px 0; font-size: 14px;">* Below chart refreshes every minute during trading day</h3>
+      <iframe
+        id="candlestick-iframe"
+        src="/graphs/sp500_candlestick_daily_1m.html"
+        style="width: 100%; height: 480px; border: 1px solid #d1d5db; border-radius: 8px;"
+      ></iframe>
     </div>
-
   {% else %}
-    <p>No treemap files found in the treemaps folder.</p>
+    <!-- existing next-open + countdown block stays as-is -->
+    <p style="font-size: 14px; margin-top: 8px; color:#4b5563;">
+      Next market open (New York time):
+    </p>
+    <p id="next-open-display"
+       style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">
+    </p>
+
+    <div style="margin-top: 8px;">
+      <p style="font-size: 14px; margin-bottom: 4px;">Time until next open:</p>
+      <div id="countdown"
+           style="font-size: 20px; font-weight: 600; letter-spacing: 1px;">
+        {{ rem_days }}d {{ rem_hours }}h {{ rem_minutes }}m {{ rem_seconds }}s
+      </div>
+    </div>
   {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
+{% if not market_open and next_open_iso %}
 <script>
-  const container = document.getElementById('data-source-container');
-  const toggle = document.getElementById('data-source-toggle');
-  const label = document.getElementById('data-source-label');
+  const nextOpenIso = "{{ next_open_iso }}";
+  const nextOpen = new Date(nextOpenIso);
 
-  let s3EnabledFlag = false;
-  if (container) {
-    const attr = container.getAttribute('data-s3-enabled');
-    s3EnabledFlag = (attr === 'true');
+  const nextOpenDisplay = document.getElementById('next-open-display');
+  const countdownEl = document.getElementById('countdown');
+
+  if (nextOpenDisplay) {
+    const opts = {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZoneName: 'short', timeZone: 'America/New_York'
+    };
+    const formatter = new Intl.DateTimeFormat('en-US', opts);
+    nextOpenDisplay.textContent = formatter.format(nextOpen);
   }
 
-  function currentPagePath() {
-    return window.location.pathname; // e.g. "/page2"
+  function updateCountdown() {
+    const now = new Date();
+    const diffMs = nextOpen.getTime() - now.getTime();
+    if (diffMs <= 0) {
+      countdownEl.textContent = "Market should be open now.";
+      clearInterval(timerId);
+      return;
+    }
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const days = Math.floor(totalSeconds / (24 * 3600));
+    const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    countdownEl.textContent = `${days}d ${hours}h ${minutes}m ${seconds}s`;
   }
 
-  if (toggle && s3EnabledFlag) {
-    toggle.addEventListener('change', () => {
-      const source = toggle.checked ? 's3' : 'local';
-      label.textContent = source === 's3' ? 'AWS S3' : 'Local';
-      const base = currentPagePath();
-      const url = `${base}?source=${encodeURIComponent(source)}`;      window.location.href = url;
-    });
+  const timerId = setInterval(updateCountdown, 1000);
+  updateCountdown();
+</script>
+{% endif %}
+
+{% if market_open %}
+<script>
+  const iframe = document.getElementById('candlestick-iframe');
+  if (iframe) {
+    // reload every 60 seconds; adjust as needed
+    setInterval(() => {
+      // add a cache-buster query param so the browser doesn't use a cached copy
+      const base = "/graphs/sp500_candlestick_daily_1m.html";
+      const ts = Date.now();
+      iframe.src = base + "?t=" + ts;
+    }, 60000);
   }
 </script>
-{% endblock %}
+{% endif %}
 
+{% endblock %}
