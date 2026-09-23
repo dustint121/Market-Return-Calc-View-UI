@@ -247,6 +247,152 @@ def get_market_data_of_sp500(current_date, use_S3=False):
         return df, total_market_cap
 
 
+# ---------- Combined treemap metadata helpers ----------
+# Metadata for all treemap snapshots is stored in a SINGLE combined file
+# (treemap_metadata/all_metadata.json) instead of one JSON file per date.
+# This avoids doing one S3 GET per trading day when loading /page1 (the
+# treemap listing page), which was slow once many snapshots existed.
+#
+# Combined file format: {"records": {"YYYY-MM-DD": {"date": ..., "sp500_percent_change": ..., "total_market_cap": ...}, ...}}
+
+COMBINED_METADATA_KEY = "treemap_metadata/all_metadata.json"
+COMBINED_METADATA_FILENAME = "all_metadata.json"
+
+
+def _load_combined_metadata_s3(s3_client):
+    """Return the combined metadata dict from S3, or an empty one if missing/unreadable."""
+    try:
+        obj = s3_client.get_object(Bucket=AWS_S3_BUCKET_NAME, Key=COMBINED_METADATA_KEY)
+        return json.load(obj["Body"])
+    except s3_client.exceptions.NoSuchKey:
+        return {"records": {}}
+    except Exception as e:
+        print(f"Could not read combined metadata from S3 ({e}); starting fresh.")
+        return {"records": {}}
+
+
+def _save_combined_metadata_s3(s3_client, combined):
+    buffer = StringIO()
+    json.dump(combined, buffer)
+    s3_client.put_object(
+        Bucket=AWS_S3_BUCKET_NAME,
+        Key=COMBINED_METADATA_KEY,
+        Body=buffer.getvalue(),
+        ContentType="application/json",
+    )
+
+
+def _load_combined_metadata_local(meta_dir):
+    path = os.path.join(meta_dir, COMBINED_METADATA_FILENAME)
+    if os.path.isfile(path):
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Could not read combined metadata locally ({e}); starting fresh.")
+    return {"records": {}}
+
+
+def _save_combined_metadata_local(meta_dir, combined):
+    os.makedirs(meta_dir, exist_ok=True)
+    path = os.path.join(meta_dir, COMBINED_METADATA_FILENAME)
+    with open(path, "w") as f:
+        json.dump(combined, f)
+
+
+def _migrate_legacy_per_date_files_s3(s3_client, combined):
+    """One-time migration: fold any legacy per-date JSON files (treemap_metadata/YYYY-MM-DD.json)
+    into the combined file, then leave the old files in place (harmless, just unused going forward).
+    Safe to call every run; it's a no-op once nothing legacy remains unmerged."""
+    response = s3_client.list_objects_v2(Bucket=AWS_S3_BUCKET_NAME, Prefix="treemap_metadata/")
+    changed = False
+    if "Contents" in response:
+        for obj in response["Contents"]:
+            key = obj["Key"]
+            filename = key.split("/")[-1]
+            if not filename.endswith(".json") or filename == COMBINED_METADATA_FILENAME:
+                continue
+            date_str = filename[: -len(".json")]
+            if date_str in combined["records"]:
+                continue  # already migrated
+            try:
+                json_obj = s3_client.get_object(Bucket=AWS_S3_BUCKET_NAME, Key=key)
+                data = json.load(json_obj["Body"])
+                combined["records"][data.get("date", date_str)] = data
+                changed = True
+            except Exception as e:
+                print(f"Skipping legacy metadata file {key}: {e}")
+    return changed
+
+
+def _migrate_legacy_per_date_files_local(meta_dir, combined):
+    if not os.path.isdir(meta_dir):
+        return False
+    changed = False
+    for filename in os.listdir(meta_dir):
+        if not filename.endswith(".json") or filename == COMBINED_METADATA_FILENAME:
+            continue
+        date_str = filename[: -len(".json")]
+        if date_str in combined["records"]:
+            continue  # already migrated
+        try:
+            with open(os.path.join(meta_dir, filename), "r") as f:
+                data = json.load(f)
+            combined["records"][data.get("date", date_str)] = data
+            changed = True
+        except Exception as e:
+            print(f"Skipping legacy metadata file {filename}: {e}")
+    return changed
+
+
+def write_treemap_metadata(current_date, sp500_percent_change, total_market_cap_str, use_S3=False):
+    """Add/update one date's record in the combined metadata file."""
+    record = {
+        "date": current_date,
+        "sp500_percent_change": sp500_percent_change,
+        "total_market_cap": total_market_cap_str,
+    }
+    if use_S3:
+        s3_client = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+        combined = _load_combined_metadata_s3(s3_client)
+        combined.setdefault("records", {})
+        combined["records"][current_date] = record
+        _save_combined_metadata_s3(s3_client, combined)
+    else:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        meta_dir = os.path.join(BASE_DIR, "treemap_metadata")
+        combined = _load_combined_metadata_local(meta_dir)
+        combined.setdefault("records", {})
+        combined["records"][current_date] = record
+        _save_combined_metadata_local(meta_dir, combined)
+
+
+def read_all_treemap_metadata(use_S3=False):
+    """Read all treemap metadata from the single combined file (one request/read total),
+    transparently migrating any older per-date JSON files into it the first time they're seen."""
+    if use_S3:
+        s3_client = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+        combined = _load_combined_metadata_s3(s3_client)
+        combined.setdefault("records", {})
+        if _migrate_legacy_per_date_files_s3(s3_client, combined):
+            _save_combined_metadata_s3(s3_client, combined)
+        metadata = list(combined["records"].values())
+    else:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        meta_dir = os.path.join(BASE_DIR, "treemap_metadata")
+        combined = _load_combined_metadata_local(meta_dir)
+        combined.setdefault("records", {})
+        if _migrate_legacy_per_date_files_local(meta_dir, combined):
+            _save_combined_metadata_local(meta_dir, combined)
+        metadata = list(combined["records"].values())
+
+    metadata_df = pd.DataFrame(metadata)
+    if metadata_df.empty:
+        return pd.DataFrame(columns=["date", "sp500_percent_change", "total_market_cap"])
+    metadata_df = metadata_df.sort_values(by="date", ascending=True).reset_index(drop=True)
+    metadata_df['sp500_percent_change'] = metadata_df['sp500_percent_change'].round(2)
+    return metadata_df
+
 
 def generate_sp500_treemap(current_date="2025-12-31", test_mode=False, use_industry=False, use_S3=False):
     df = None
@@ -441,66 +587,17 @@ def generate_sp500_treemap(current_date="2025-12-31", test_mode=False, use_indus
                                 Body=html_buffer.getvalue(),
                                 ContentType="text/html"
                             )
-        # store sp500_percent_change and total_market_cap_str to json
-        metadata_buffer = StringIO()
-        json.dump({
-            "date": current_date,
-            "sp500_percent_change": sp500_percent_change,
-            "total_market_cap": total_market_cap_str
-        }, metadata_buffer)
-        s3_client.put_object(
-                                Bucket=AWS_S3_BUCKET_NAME,
-                                Key=f"treemap_metadata/{current_date}.json",
-                                Body=metadata_buffer.getvalue(),
-                                ContentType="application/json"
-                            )
+        # store sp500_percent_change and total_market_cap_str into the combined metadata file
+        write_treemap_metadata(current_date, sp500_percent_change, total_market_cap_str, use_S3=True)
     else:
         os.makedirs("treemaps", exist_ok=True)
         fig.write_html(f"treemaps/{current_date}_treemap.html")
 
-        #store sp500_percent_change and total_market_cap_str to json
-        os.makedirs(f"{BASE_DIR}/treemap_metadata", exist_ok=True)
-        with open(f"{BASE_DIR}/treemap_metadata/{current_date}.json", "w") as json_file:
-            json.dump({
-                "date": current_date,
-                "sp500_percent_change": sp500_percent_change,
-                "total_market_cap": total_market_cap_str
-            }, json_file)
+        # store sp500_percent_change and total_market_cap_str into the combined metadata file
+        write_treemap_metadata(current_date, sp500_percent_change, total_market_cap_str, use_S3=False)
 
 
 
-
-def read_all_treemap_metadata(use_S3=False):
-    metadata = []
-    if use_S3:
-        # read from S3
-        s3_client = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
-        response = s3_client.list_objects_v2(Bucket=AWS_S3_BUCKET_NAME, Prefix="treemap_metadata/")
-        if 'Contents' in response:
-            for obj in response['Contents']:
-                key = obj['Key']
-                if key.endswith(".json"):
-                    json_obj = s3_client.get_object(Bucket=AWS_S3_BUCKET_NAME, Key=key)
-                    data = json.load(json_obj['Body'])
-                    metadata.append(data)
-    else:
-        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        meta_dir = os.path.join(BASE_DIR, "treemap_metadata")
-        if os.path.isdir(meta_dir):
-            for json_file in os.listdir(meta_dir):
-                if json_file.endswith(".json"):
-                    with open(os.path.join(meta_dir, json_file), "r") as f:
-                        data = json.load(f)
-                        metadata.append(data)
-        else:
-            # no local metadata present; return empty
-            metadata = []
-    metadata_df = pd.DataFrame(metadata)
-    if metadata_df.empty:
-        return pd.DataFrame(columns=["date", "sp500_percent_change", "total_market_cap"])
-    metadata_df = metadata_df.sort_values(by="date", ascending=True).reset_index(drop=True)
-    metadata_df['sp500_percent_change'] = metadata_df['sp500_percent_change'].round(2)
-    return metadata_df
 
 # Function to generate candlestick chart of S&P 500 index for today with 1-minute intervals
     # store locally in sp500_candlestick_daily_1m.html
@@ -559,31 +656,7 @@ def generate_candlestick_chart_sp500():
 
 
 
-
-
 if __name__ == "__main__":
-    #use mcal to get trading days between 2026-01-01 to 2026-01-17 in yyyy-mm-dd format
-    # nyse = mcal.get_calendar('NYSE')
-    # schedule = nyse.schedule(start_date='2026-01-01', end_date='2026-01-03')
-    # trading_days = mcal.date_range(schedule, frequency='1D').strftime('%Y-%m-%d').tolist()
-
-    # for current_date in trading_days:
-    #     print(f"Generating treemap for {current_date}...")
-    #     # generate market data
-    #     # get_market_data_of_sp500(current_date)
-    #     get_market_data_of_sp500(current_date, use_S3=True)
-    #     # generate treemap
-    #     # generate_sp500_treemap(current_date)
-    #     generate_sp500_treemap(current_date, use_S3=True)
-
-
-    # df = get_current_sp500_companies(current_date="2026-08-21")
-
-
-
-    # get argument from command line for date
-        # using s3 by default
     x = 1
 
     #NOTE: project note: sp500 overall % is off for treemaps, need to double check
-
