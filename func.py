@@ -16,9 +16,34 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_S3_BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME")
+
+
+def get_setting(env_name):
+    """
+    Reads a setting from the environment (.env), and if it is missing,
+    from a Prefect Secret block. The block name is the env name in lowercase
+    with '-' instead of '_', ex: AWS_ACCESS_KEY_ID -> 'aws-access-key-id'.
+    The Secret fallback is used on Prefect Managed runs, where there is no .env file.
+
+    Inputs:
+        env_name (str): environment variable name
+
+    Output:
+        str or None: the setting value, or None if not found anywhere
+    """
+    value = os.getenv(env_name)
+    if value:
+        return value
+    try:
+        from prefect.blocks.system import Secret
+        return Secret.load(env_name.lower().replace("_", "-")).get()
+    except Exception:
+        return None
+
+
+AWS_ACCESS_KEY_ID = get_setting("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = get_setting("AWS_SECRET_ACCESS_KEY")
+AWS_S3_BUCKET_NAME = get_setting("AWS_S3_BUCKET_NAME")
 
 
 # Function to check if date is a trading day
