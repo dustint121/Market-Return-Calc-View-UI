@@ -12,3 +12,4 @@ sp500_candlestick_daily_1m.html
 .env
 test_crontab.py
 crontab.txt
+/old_code
