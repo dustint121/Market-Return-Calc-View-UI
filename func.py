@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, time
 import numpy as np
 import pandas_market_calendars as mcal
 import os
@@ -394,7 +394,7 @@ def read_all_treemap_metadata(use_S3=False):
     return metadata_df
 
 
-def generate_sp500_treemap(current_date="2025-12-31", test_mode=False, use_industry=False, use_S3=False):
+def generate_sp500_treemap(current_date=str(datetime.now().strftime("%Y-%m-%d")), test_mode=False, use_industry=False, use_S3=True):
     df = None
     if test_mode:
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # folder of this file
